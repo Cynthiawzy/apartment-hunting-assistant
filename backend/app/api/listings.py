@@ -59,6 +59,7 @@ async def _query_listings(
     *,
     budget_max: float | None,
     min_beds: float | None,
+    min_bathrooms: float | None,
     latitude: float | None,
     longitude: float | None,
     radius_km: float | None,
@@ -85,6 +86,8 @@ async def _query_listings(
         stmt = stmt.where(Listing.price <= budget_max)
     if min_beds is not None:
         stmt = stmt.where(Listing.bedrooms >= min_beds)
+    if min_bathrooms is not None:
+        stmt = stmt.where(Listing.bathrooms >= min_bathrooms)
 
     if latitude is not None and longitude is not None and radius_km is not None:
         stmt = stmt.where(
@@ -147,6 +150,7 @@ async def create_listing(
 async def list_listings(
     budget_max: float | None = Query(default=None, gt=0),
     min_beds: float | None = Query(default=None, ge=0),
+    min_bathrooms: float | None = Query(default=None, ge=0),
     latitude: float | None = Query(default=None, ge=-90, le=90),
     longitude: float | None = Query(default=None, ge=-180, le=180),
     radius_km: float | None = Query(default=None, gt=0, le=100),
@@ -158,6 +162,7 @@ async def list_listings(
         filters = ListingFilter(
             budget_max=budget_max,
             min_beds=min_beds,
+            min_bathrooms=min_bathrooms,
             latitude=latitude,
             longitude=longitude,
             radius_km=radius_km,
@@ -174,6 +179,7 @@ async def list_listings(
         db,
         budget_max=filters.budget_max,
         min_beds=filters.min_beds,
+        min_bathrooms=filters.min_bathrooms,
         latitude=filters.latitude,
         longitude=filters.longitude,
         radius_km=filters.radius_km,
@@ -189,6 +195,7 @@ async def nearby_listings(
     radius_km: float = Query(..., gt=0, le=100),
     budget_max: float | None = Query(default=None, gt=0),
     min_beds: float | None = Query(default=None, ge=0),
+    min_bathrooms: float | None = Query(default=None, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> list[ListingResponse]:
@@ -196,6 +203,7 @@ async def nearby_listings(
         db,
         budget_max=budget_max,
         min_beds=min_beds,
+        min_bathrooms=min_bathrooms,
         latitude=latitude,
         longitude=longitude,
         radius_km=radius_km,

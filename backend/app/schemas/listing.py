@@ -48,6 +48,7 @@ class ListingResponse(ListingBase):
 class ListingFilter(BaseModel):
     budget_max: float | None = Field(default=None, gt=0)
     min_beds: float | None = Field(default=None, ge=0)
+    min_bathrooms: float | None = Field(default=None, ge=0)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=100)
