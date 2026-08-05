@@ -33,4 +33,4 @@ class User(Base, TimestampMixin):
 
     preferred_neighborhood_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
 
-    outreach_requests: Mapped[list["OutreachRequest"]] = relationship(back_populates="user")
+    outreach_requests: Mapped[list[OutreachRequest]] = relationship(back_populates="user")

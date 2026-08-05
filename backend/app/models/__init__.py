@@ -8,9 +8,9 @@ __all__ = [
     "Base",
     "Listing",
     "ListingStatus",
-    "SourceSite",
     "Neighborhood",
     "OutreachRequest",
     "OutreachStatus",
+    "SourceSite",
     "User",
 ]

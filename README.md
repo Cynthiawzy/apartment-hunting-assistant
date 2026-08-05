@@ -44,14 +44,29 @@ backend/
   app/
     core/       # settings, async DB session
     models/     # SQLAlchemy 2.0 ORM models (PostGIS geometry columns via GeoAlchemy2)
+    schemas/    # Pydantic v2 request/response schemas
+    api/        # FastAPI routers
+    main.py     # FastAPI app, CORS
   alembic/      # migrations (0001 creates the postgis extension + all tables)
 docker-compose.yml  # local Postgres/PostGIS
+```
+
+## Phase 2: FastAPI Backend & Geospatial Endpoints
+
+`GET /api/listings/nearby` uses `ST_DWithin`/`ST_Distance` (cast to `geography` for accurate meter-based radius) to find active listings within a radius of a lat/lng, sorted by distance. `GET /api/listings/` supports the same optional geo filter plus `budget_max`/`min_beds`. `POST /api/listings/` creates a listing from lat/lng (stored as a PostGIS point).
+
+### Run the API
+
+```bash
+cd backend
+uv run uvicorn app.main:app --reload
+# docs at http://127.0.0.1:8000/docs
 ```
 
 ## Development Phases
 
 1. **Local Docker Compose (Postgres/PostGIS) & Database Models** — done
-2. FastAPI Backend & PostGIS Geospatial Endpoints (`ST_DWithin` radius search)
+2. **FastAPI Backend & PostGIS Geospatial Endpoints** — done
 3. React + Mapbox Frontend Map Interface & Filters
 4. Playwright Web Scraper Engine
 5. LangGraph AI Agent & Twilio SMS Service

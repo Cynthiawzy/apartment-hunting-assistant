@@ -40,7 +40,8 @@ class Listing(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     source_site: Mapped[SourceSite] = mapped_column(
-        SAEnum(SourceSite, name="source_site"), nullable=False
+        SAEnum(SourceSite, name="source_site", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
     )
     source_listing_id: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -70,15 +71,17 @@ class Listing(Base, TimestampMixin):
 
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ListingStatus] = mapped_column(
-        SAEnum(ListingStatus, name="listing_status"),
+        SAEnum(
+            ListingStatus, name="listing_status", values_callable=lambda e: [m.value for m in e]
+        ),
         nullable=False,
         default=ListingStatus.ACTIVE,
     )
     scraped_at: Mapped[date] = mapped_column(nullable=False)
 
     neighborhood_id: Mapped[int | None] = mapped_column(ForeignKey("neighborhoods.id"))
-    neighborhood: Mapped["Neighborhood | None"] = relationship(back_populates="listings")
+    neighborhood: Mapped[Neighborhood | None] = relationship(back_populates="listings")
 
-    outreach_requests: Mapped[list["OutreachRequest"]] = relationship(
+    outreach_requests: Mapped[list[OutreachRequest]] = relationship(
         back_populates="listing"
     )

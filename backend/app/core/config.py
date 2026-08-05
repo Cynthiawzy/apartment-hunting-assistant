@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     database_url: str
     database_url_sync: str
 
+    cors_allow_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
     mapbox_access_token: str = ""
 
     twilio_account_sid: str = ""

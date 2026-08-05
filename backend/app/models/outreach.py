@@ -32,7 +32,11 @@ class OutreachRequest(Base, TimestampMixin):
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), nullable=False)
 
     status: Mapped[OutreachStatus] = mapped_column(
-        SAEnum(OutreachStatus, name="outreach_status"),
+        SAEnum(
+            OutreachStatus,
+            name="outreach_status",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
         default=OutreachStatus.DRAFT,
     )
@@ -44,5 +48,5 @@ class OutreachRequest(Base, TimestampMixin):
     response_body: Mapped[str | None] = mapped_column(Text)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    user: Mapped["User"] = relationship(back_populates="outreach_requests")
-    listing: Mapped["Listing"] = relationship(back_populates="outreach_requests")
+    user: Mapped[User] = relationship(back_populates="outreach_requests")
+    listing: Mapped[Listing] = relationship(back_populates="outreach_requests")

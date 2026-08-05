@@ -29,4 +29,4 @@ class Neighborhood(Base, TimestampMixin):
     median_rent_2br: Mapped[float | None] = mapped_column(Numeric(10, 2))
     median_rent_3br: Mapped[float | None] = mapped_column(Numeric(10, 2))
 
-    listings: Mapped[list["Listing"]] = relationship(back_populates="neighborhood")
+    listings: Mapped[list[Listing]] = relationship(back_populates="neighborhood")
