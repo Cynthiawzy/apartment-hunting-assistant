@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     mapbox_access_token: str = ""
 
+    brightdata_api_key: str = ""
+
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""

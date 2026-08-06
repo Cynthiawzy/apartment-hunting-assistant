@@ -1,4 +1,10 @@
-export type SourceSite = 'zillow' | 'apartments_com' | 'craigslist' | 'streeteasy' | 'other'
+export type SourceSite =
+  | 'zillow'
+  | 'apartments_com'
+  | 'craigslist'
+  | 'streeteasy'
+  | 'facebook_marketplace'
+  | 'other'
 
 export type ListingStatus = 'active' | 'pending' | 'leased' | 'inactive'
 
@@ -16,7 +22,8 @@ export interface Listing {
   longitude: number
   price: number
   bedrooms: number
-  bathrooms: number
+  /** Null for listings with no dedicated bathroom count (e.g. "private room" / shared-housing listings). */
+  bathrooms: number | null
   sqft: number | null
   available_date: string | null
   pet_friendly: boolean | null

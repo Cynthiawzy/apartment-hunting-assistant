@@ -154,6 +154,36 @@ export const MOCK_LISTINGS: Listing[] = [
     created_at: now,
     updated_at: now,
   },
+  {
+    id: 6,
+    source_site: 'facebook_marketplace',
+    source_listing_id: 'fb-106',
+    url: 'https://facebook.com/marketplace/item/6',
+    address_line: 'Exact address not public (Facebook Marketplace) — contact seller via listing',
+    unit: null,
+    city: 'Boston',
+    state: 'MA',
+    zip_code: '',
+    latitude: 42.3505,
+    longitude: -71.0756,
+    price: 950,
+    bedrooms: 1,
+    bathrooms: null,
+    sqft: null,
+    available_date: null,
+    pet_friendly: null,
+    amenities: null,
+    landlord_name: null,
+    landlord_phone: null,
+    landlord_email: null,
+    description: 'Private room for rent in shared house. Utilities included.',
+    status: 'active',
+    scraped_at: now,
+    neighborhood_id: null,
+    distance_km: null,
+    created_at: now,
+    updated_at: now,
+  },
 ]
 
 /** Mirrors the backend's filtering logic (budget/beds/baths/radius) against the fixture data. */
@@ -163,7 +193,8 @@ export function filterMockListings(filters: ListingFilters, center: GeoPoint): L
     .filter((listing) => filters.minBeds === undefined || listing.bedrooms >= filters.minBeds)
     .filter(
       (listing) =>
-        filters.minBathrooms === undefined || listing.bathrooms >= filters.minBathrooms,
+        filters.minBathrooms === undefined ||
+        (listing.bathrooms !== null && listing.bathrooms >= filters.minBathrooms),
     )
     .map((listing): Listing => {
       if (filters.radiusKm === undefined) return listing

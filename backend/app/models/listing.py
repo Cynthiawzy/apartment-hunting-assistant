@@ -21,6 +21,7 @@ class SourceSite(str, enum.Enum):
     APARTMENTS_COM = "apartments_com"
     CRAIGSLIST = "craigslist"
     STREETEASY = "streeteasy"
+    FACEBOOK_MARKETPLACE = "facebook_marketplace"
     OTHER = "other"
 
 
@@ -58,7 +59,9 @@ class Listing(Base, TimestampMixin):
 
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     bedrooms: Mapped[float] = mapped_column(Numeric(3, 1), nullable=False)
-    bathrooms: Mapped[float] = mapped_column(Numeric(3, 1), nullable=False)
+    # Nullable: "private room" / shared-housing listings often have no
+    # dedicated bathroom count to report (it's shared with the household).
+    bathrooms: Mapped[float | None] = mapped_column(Numeric(3, 1), nullable=True)
     sqft: Mapped[int | None] = mapped_column()
 
     available_date: Mapped[date | None] = mapped_column(Date)

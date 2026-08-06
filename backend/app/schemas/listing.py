@@ -18,7 +18,7 @@ class ListingBase(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     price: float = Field(gt=0)
     bedrooms: float = Field(ge=0)
-    bathrooms: float = Field(ge=0)
+    bathrooms: float | None = Field(default=None, ge=0)
     sqft: int | None = Field(default=None, gt=0)
     available_date: date | None = None
     pet_friendly: bool | None = None

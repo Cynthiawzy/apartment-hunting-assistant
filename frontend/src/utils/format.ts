@@ -6,8 +6,9 @@ export function formatPrice(price: number): string {
   })
 }
 
-export function formatBedsBaths(bedrooms: number, bathrooms: number): string {
+export function formatBedsBaths(bedrooms: number, bathrooms: number | null): string {
   const beds = bedrooms === 0 ? 'Studio' : `${bedrooms} bd`
+  if (bathrooms === null) return beds
   return `${beds} · ${bathrooms} ba`
 }
 

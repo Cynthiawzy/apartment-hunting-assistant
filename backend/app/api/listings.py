@@ -2,21 +2,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from geoalchemy2 import Geography
-from geoalchemy2.elements import WKTElement
 from pydantic import ValidationError
 from sqlalchemy import ColumnElement, func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.crud.listings import DuplicateListingError, make_point
+from app.crud.listings import create_listing as crud_create_listing
 from app.models.listing import Listing, ListingStatus
 from app.schemas.listing import ListingCreate, ListingFilter, ListingResponse
 
 router = APIRouter(prefix="/api/listings", tags=["listings"])
-
-
-def _make_point(latitude: float, longitude: float) -> WKTElement:
-    return WKTElement(f"POINT({longitude} {latitude})", srid=4326)
 
 
 def _to_response(
@@ -36,7 +32,7 @@ def _to_response(
         longitude=longitude,
         price=float(listing.price),
         bedrooms=float(listing.bedrooms),
-        bathrooms=float(listing.bathrooms),
+        bathrooms=float(listing.bathrooms) if listing.bathrooms is not None else None,
         sqft=listing.sqft,
         available_date=listing.available_date,
         pet_friendly=listing.pet_friendly,
@@ -73,7 +69,7 @@ async def _query_listings(
     columns: list[Any] = [Listing, lat_col, lng_col]
 
     if latitude is not None and longitude is not None and radius_km is not None:
-        origin = _make_point(latitude, longitude)
+        origin = make_point(latitude, longitude)
         origin_geography = func.cast(origin, Geography)
         location_geography = func.cast(Listing.location, Geography)
 
@@ -107,41 +103,10 @@ async def _query_listings(
 async def create_listing(
     payload: ListingCreate, db: AsyncSession = Depends(get_db)
 ) -> ListingResponse:
-    listing = Listing(
-        source_site=payload.source_site,
-        source_listing_id=payload.source_listing_id,
-        url=payload.url,
-        address_line=payload.address_line,
-        unit=payload.unit,
-        city=payload.city,
-        state=payload.state,
-        zip_code=payload.zip_code,
-        location=_make_point(payload.latitude, payload.longitude),
-        price=payload.price,
-        bedrooms=payload.bedrooms,
-        bathrooms=payload.bathrooms,
-        sqft=payload.sqft,
-        available_date=payload.available_date,
-        pet_friendly=payload.pet_friendly,
-        amenities=payload.amenities,
-        landlord_name=payload.landlord_name,
-        landlord_phone=payload.landlord_phone,
-        landlord_email=payload.landlord_email,
-        description=payload.description,
-        status=payload.status,
-        scraped_at=payload.scraped_at,
-        neighborhood_id=payload.neighborhood_id,
-    )
-    db.add(listing)
     try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A listing with this source_site/source_listing_id already exists",
-        ) from exc
-    await db.refresh(listing)
+        listing = await crud_create_listing(db, payload)
+    except DuplicateListingError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     return _to_response(listing, payload.latitude, payload.longitude)
 
