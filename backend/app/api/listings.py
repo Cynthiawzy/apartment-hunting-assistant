@@ -37,6 +37,7 @@ def _to_response(
         available_date=listing.available_date,
         pet_friendly=listing.pet_friendly,
         amenities=listing.amenities,
+        images=listing.images,
         landlord_name=listing.landlord_name,
         landlord_phone=listing.landlord_phone,
         landlord_email=listing.landlord_email,

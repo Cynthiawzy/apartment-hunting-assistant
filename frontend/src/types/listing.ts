@@ -4,6 +4,7 @@ export type SourceSite =
   | 'craigslist'
   | 'streeteasy'
   | 'facebook_marketplace'
+  | 'kijiji'
   | 'other'
 
 export type ListingStatus = 'active' | 'pending' | 'leased' | 'inactive'
@@ -28,6 +29,7 @@ export interface Listing {
   available_date: string | null
   pet_friendly: boolean | null
   amenities: string[] | null
+  images: string[] | null
   landlord_name: string | null
   landlord_phone: string | null
   landlord_email: string | null

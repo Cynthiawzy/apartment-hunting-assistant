@@ -22,6 +22,7 @@ class SourceSite(str, enum.Enum):
     CRAIGSLIST = "craigslist"
     STREETEASY = "streeteasy"
     FACEBOOK_MARKETPLACE = "facebook_marketplace"
+    KIJIJI = "kijiji"
     OTHER = "other"
 
 
@@ -71,6 +72,10 @@ class Listing(Base, TimestampMixin):
     landlord_name: Mapped[str | None] = mapped_column(String(120))
     landlord_phone: Mapped[str | None] = mapped_column(String(20))
     landlord_email: Mapped[str | None] = mapped_column(String(255))
+
+    # Text, not a length-capped varchar (like amenities uses) — real CDN photo
+    # URLs (e.g. Facebook's) routinely run past 300 characters.
+    images: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ListingStatus] = mapped_column(

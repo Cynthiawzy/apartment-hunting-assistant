@@ -67,6 +67,10 @@ uv run uvicorn app.main:app --reload
 
 `MapView` renders one marker per listing (a price bubble); hovering shows a popup with price/address, clicking a marker or a sidebar listing card opens `ListingModal` with full details. `Sidebar` filter inputs (budget, beds, baths, radius) are debounced (400ms) and drive a `useListings` hook that refetches `GET /api/listings/`. Radius filtering uses the current map center, tracked via the map's `moveend` event.
 
+**Marker clustering** (`utils/cluster.ts`): listings whose on-screen pixel distance is within 45px get grouped into a numbered blue bubble instead of overlapping price markers — genuinely necessary given many scraped listings share identical city-center coordinates (see Phase 4's Facebook Marketplace notes). Pixel-based rather than a fixed geo-distance, so it's naturally zoom-aware without extra recomputation logic — re-clustered on the map's `moveend` (which fires for both pan and zoom). Clicking a cluster opens a popup listing every listing in it (price + address); clicking a row opens the same `ListingModal` as an individual marker.
+
+**Listing photos**: `ListingCard` shows a thumbnail (first image, or a placeholder icon if the listing has none) and `ListingModal` shows a horizontally scrollable photo strip across the top. Backed by a `listings.images: text[]` column populated by whichever scraper found the listing — schema.org JSON-LD `image` for the generic Playwright scraper (string, array, or ImageObject, all normalized to a flat URL list), Bright Data's `images` field for Facebook Marketplace. `null` when a source has no photos.
+
 ### Setup
 
 ```bash
@@ -96,8 +100,9 @@ frontend/
     mocks/listings.ts       # static fixture + client-side filtering for VITE_USE_MOCK_LISTINGS
     hooks/useListings.ts    # debounced fetch-on-filter-change
     types/listing.ts        # Listing, ListingFilters, FilterDraft
+    utils/cluster.ts         # pixel-distance marker clustering
     components/
-      MapView.tsx            # mapbox-gl markers + hover popups
+      MapView.tsx            # mapbox-gl markers + hover popups + clustering
       Sidebar.tsx             # filter inputs + listing card list
       ListingCard.tsx
       ListingModal.tsx        # full listing detail modal
@@ -152,7 +157,20 @@ Fetches one listing you already have the URL for (e.g. a "paste a link" feature)
 
 **Confirmed record schema** (verified against a real example record): `url`, `title`, `initial_price`/`final_price`, `currency`, `product_id`, `location` (`"City, ST"`), `description`, `seller_description`, `is_sold`, plus category-specific fields (`condition`, `color`, `brand`, `car_miles`, ...) that only apply to non-housing categories and are harmlessly ignored. There is **no seller name/phone/email field at all** — Marketplace contact happens via Messenger — so `landlord_phone`/`landlord_email` only ever come from whatever a seller happened to type into the description text, and `landlord_name` is always `None`. `is_sold: true` maps to `ListingStatus.LEASED` instead of `ACTIVE`. Bedrooms/bathrooms/sqft aren't confirmed as dedicated fields for the rentals category specifically, so those go through the same regex fallback the Playwright scraper uses for pages without JSON-LD.
 
-**Marketplace is peer-to-peer**, so listings rarely expose a full street address (sellers share that after contact) — when only a city/state is available, `address_line` gets an honest placeholder ("Exact address not public…") for display, but geocoding uses a separate `geocode_query` ("City, ST" only) rather than sending that placeholder text to the geocoder — the zip is then whatever Nominatim resolves for the city center.
+**Marketplace is peer-to-peer**, so listings rarely expose a full street address (sellers share that after contact) — this can't be fixed (it's a platform-level privacy choice, not a scraper gap), but real listing text often contains usable location signal we were previously discarding. Address resolution tries, in order:
+1. A real street address near the known city (`"105 George Street, Toronto"` — found in real data; the strict "street, city, ST zip" pattern missed it since Marketplace text never has a trailing state+zip, and Canadian postal codes like `L9A 4G2` don't match a US zip pattern anyway)
+2. A cross-street intersection with a location-indicating trigger word (`"near Bathurst and Eglinton"`, `"@ Warden/Lawrence"`) — **verified against real Nominatim behavior, not assumed**: intersections only reliably geocode using `"&"` as the separator (`"and"` mostly doesn't work), and even then only ~50% of real intersections resolve (depends on whether OSM has that one indexed). Deliberately requires a trigger word (`near`/`at`/`@`/`corner of`) immediately before the pattern — bare `"X and Y"` is far too common in ordinary listing text (`"heat and water included"`, `"1 bed and 1 bath"`) to use safely on its own.
+3. Plain city-level geocoding with an honest placeholder ("Exact address not public…") for the street line
+
+Because intersection geocoding is unreliable, every precise attempt carries a `geocode_fallback_query` (the plain city) that `geocode_and_save` tries if the precise one fails — **and swaps `address_line` back to the honest placeholder when that happens**, so a displayed "Near X & Y" is never left dangling on coordinates that are actually just the city center (caught by testing against real data, not obvious from the code alone).
+
+**No, we can't extract Facebook's own "approximate location" map data.** Facebook's listing page renders an interactive approximate-location map, but that's Facebook's own frontend data — confirmed exhaustively (every key across a real 792-record dataset) that Bright Data's Marketplace scraper does not expose any latitude/longitude/coordinates field at all, only the plain-text `location` field ("City, ST") covered above. This isn't something extraction logic can work around; the data simply isn't in what this third-party scraper returns.
+
+**A real, confirmed mislabeling bug this surfaced:** a "Toronto" search returns listings from a wide surrounding region — 24 distinct cities showed up in real `location` values from one search alone — so defaulting every listing with no other location signal to the searched city was systematically wrong for listings actually located elsewhere. `_find_known_city` matches known municipality names mentioned in the listing's own text (e.g. "Brampton's most desirable areas," "Prime Hamilton Location," "Pickering's most prestigious neighborhoods") — even without a formatted ", ON" suffix — and takes priority over the searched-city fallback.
+
+The city list is sourced from authoritative municipality lists (GTA, Hamilton, Niagara Region, Waterloo Region, Simcoe County — the metro area a Toronto search realistically spans), not accumulated one miss at a time. It's split into two tiers by confirmed false-positive risk: a striking number of Ontario town names are also common English words or personal names (`"Cambridge dictionary"`, `"contact Barrie"`, `"Milton Friedman"`, `"Aurora borealis"` all matched during testing) — those require a location trigger word (`near`/`at`/`in`) immediately before them, same pattern as intersection detection. A few (King, Tiny, Lincoln, Midland) are excluded even from that gated tier, since e.g. "King Street" is itself a common, real Toronto address that gating alone wouldn't disambiguate from King Township.
+
+Backfilling the existing dataset with this fix corrected 5 of 27 listings that had been mislabeled with the wrong city (2 Hamilton, 2 Pickering, 1 Brampton — including one with a full, geocodable street address that only became extractable once the correct city was known).
 
 ### Bulk discovery (`discover_by=keyword`)
 

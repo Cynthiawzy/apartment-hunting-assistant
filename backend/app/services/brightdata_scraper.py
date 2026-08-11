@@ -41,6 +41,7 @@ from app.core.config import get_settings
 from app.crud.listings import DuplicateListingError
 from app.models.listing import Listing, ListingStatus, SourceSite
 from app.services.parsing import (
+    NO_STREET_ADDRESS_PLACEHOLDER,
     ScrapedListing,
     derive_source_listing_id,
     extract_contact,
@@ -68,9 +69,81 @@ DISCOVERY_TIMEOUT_SECONDS = 90.0
 
 CITY_STATE_RE = re.compile(r"([A-Za-z .'\-]+?),\s*([A-Z]{2})\b")
 
-NO_STREET_ADDRESS_PLACEHOLDER = (
-    "Exact address not public (Facebook Marketplace) — contact seller via listing"
+# Requires a location-indicating trigger word immediately before the pattern —
+# "and"/"&"/"/" alone is far too common in ordinary text ("heat and water
+# included", "kitchen and living room") to use without one. Confirmed against
+# real listings: every genuine cross-street mention we found was preceded by
+# "near"/"at"/"@"/"corner of". Deliberately excludes bare "in" as a trigger —
+# it's too generic ("in Toronto", "in a great neighborhood") and would flood
+# this with false positives.
+INTERSECTION_RE = re.compile(
+    r"(?i:near|at|@|corner of)\s+"
+    r"([A-Z][\w'\-]*(?:\s[A-Z][\w'\-]*)?)"
+    r"\s*(?i:and|&|/)\s*"
+    r"([A-Z][\w'\-]*(?:\s[A-Z][\w'\-]*)?)\b"
 )
+
+# Municipalities across the whole region a Facebook "Toronto" search actually
+# draws from — confirmed by real data (24 distinct cities showed up in a
+# single Toronto search's `location` field alone) to span far beyond city
+# limits. Rather than keep discovering individual misses one at a time (e.g.
+# "Pickering" wasn't caught until a real listing mentioning it was found),
+# this is sourced from authoritative municipality lists for the GTA (25
+# municipalities, Wikipedia), Hamilton, Niagara Region (12), Waterloo Region
+# (7), and Simcoe County (18) — the metro area a Toronto-based search
+# realistically spans, plus a few outer-ring cities individually confirmed in
+# real data (Brantford, Peterborough, Woodstock). Ontario-specific; will need
+# a different list for other markets.
+#
+# Split into two tiers by false-positive risk, confirmed by testing (not
+# assumed): a striking number of Ontario town names are *also* common English
+# words or personal names — "Cambridge dictionary", "contact Barrie",
+# "Milton Friedman", "Aurora borealis", "Wellesley college" all matched
+# during testing. SAFE_ON_CITIES are multi-word or distinctive enough to
+# match bare; AMBIGUOUS_ON_CITIES only count with a location-indicating
+# trigger word immediately before them (same "near/at/in ___" pattern as
+# intersection detection). A few (King, Tiny, Lincoln, Midland) are excluded
+# entirely even from the gated tier — "King Street" is a real, common Toronto
+# address, so gating alone doesn't make "King" safe.
+SAFE_ON_CITIES = [
+    "Toronto", "Ajax", "Clarington", "Oshawa", "Pickering", "Scugog", "Whitby",
+    "East Gwillimbury", "Markham", "Newmarket", "Richmond Hill", "Uxbridge",
+    "Vaughan", "Whitchurch-Stouffville", "Brampton", "Mississauga",
+    "Burlington", "Caledon", "Halton Hills", "Oakville", "Hamilton",
+    "Fort Erie", "Grimsby", "Niagara-on-the-Lake", "Niagara Falls", "Pelham",
+    "Port Colborne", "St Catharines", "Thorold", "Wainfleet", "Welland",
+    "West Lincoln", "Kitchener", "Waterloo", "North Dumfries", "Wilmot",
+    "Woolwich", "Orillia", "Bradford West Gwillimbury", "Collingwood",
+    "Innisfil", "New Tecumseth", "Penetanguishene", "Wasaga Beach",
+    "Adjala-Tosorontio", "Clearview", "Oro-Medonte", "Ramara", "Springwater",
+    "Brantford", "Peterborough", "Woodstock",
+]
+AMBIGUOUS_ON_CITIES = [
+    "Brock", "Aurora", "Georgina", "Milton", "Cambridge", "Wellesley",
+    "Barrie", "Essa", "Severn", "Tay",
+]
+
+SAFE_ON_CITY_RE = re.compile(
+    r"\b(" + "|".join(re.escape(c) for c in SAFE_ON_CITIES) + r")\b", re.IGNORECASE
+)
+AMBIGUOUS_ON_CITY_RE = re.compile(
+    r"(?i:near|at|in|located in|area of)\s+("
+    + "|".join(re.escape(c) for c in AMBIGUOUS_ON_CITIES)
+    + r")\b"
+)
+
+
+def _find_known_city(text: str) -> str | None:
+    match = SAFE_ON_CITY_RE.search(text) or AMBIGUOUS_ON_CITY_RE.search(text)
+    if not match:
+        return None
+    # Preserve each list's canonical casing/spelling rather than whatever
+    # casing happened to appear in the source text.
+    found = match.group(1).lower()
+    for city in SAFE_ON_CITIES + AMBIGUOUS_ON_CITIES:
+        if city.lower() == found:
+            return city
+    return None  # unreachable given match came from one of these two lists
 
 
 class BrightDataError(Exception):
@@ -289,12 +362,90 @@ class ResolvedAddress:
     # real street — geocode_and_save uses this instead of the (placeholder-
     # polluted) full address string, so the geocoder gets clean "City, ST" text.
     geocode_query: str | None = None
+    # A less-precise query to fall back to if geocode_query (e.g. an
+    # intersection) doesn't resolve — see ScrapedListing.geocode_fallback_query.
+    geocode_fallback_query: str | None = None
+
+
+def _find_street_address(text: str, city: str) -> str | None:
+    """Looks for a real street address ("105 George Street") immediately
+    followed by a known city name in free text. Confirmed against a real
+    listing whose description literally said "105 George Street, Toronto" —
+    the strict "street, city, ST zip" pattern (parse_address) missed it
+    entirely because Marketplace text never has a trailing state+zip.
+
+    The separator before the city may be a comma or one of a few common
+    prepositions ("in Hamilton", "at Hamilton") — those words must NOT end up
+    inside the captured address. Confirmed necessary against real data: "4
+    Windsor Street in Hamilton" was initially captured as "4 Windsor Street
+    in" (the "in" wrongly included) before this was made explicit."""
+    pattern = re.compile(
+        rf"(\d+[\w\s.\-']{{2,50}}?)(?:,|\s+(?:in|at|near))?\s+{re.escape(city)}\b",
+        re.IGNORECASE,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    candidate = match.group(1).strip()
+    # Sanity check: must actually look like "<number> <word...>", not just any
+    # digit run that happens to precede the city name (e.g. a price or a date).
+    if re.match(r"^\d+\s+\S", candidate) and len(candidate) <= 60:
+        return candidate
+    return None
+
+
+def _find_intersection(text: str) -> tuple[str, str] | None:
+    """Looks for a cross-street mention like "near Bathurst and Eglinton".
+    Confirmed against real Nominatim behavior (not assumed): intersection
+    geocoding only reliably resolves using "&" as the separator — "and"
+    largely doesn't — and even then only for roughly half of real intersections
+    (depends on whether OSM has that specific one indexed). That's why this is
+    always paired with a geocode_fallback_query by the caller: an intersection
+    that fails to geocode must fall back to the city, not reject the listing."""
+    match = INTERSECTION_RE.search(text)
+    if not match:
+        return None
+    return match.group(1).strip(), match.group(2).strip()
+
+
+def _build_resolved_address(blob: str, city: str, state: str) -> ResolvedAddress:
+    """Given a known city (and optionally state), tries progressively less
+    precise ways to locate the listing within it: a real street address, then
+    a cross-street intersection (with a safe fallback to plain city-level
+    geocoding if the intersection doesn't resolve), then plain city-level
+    geocoding with an honest placeholder for the street line."""
+    location_suffix = f", {city}, {state}" if state else f", {city}"
+    city_level_query = f"{city}, {state}" if state else city
+
+    street = _find_street_address(blob, city)
+    if street:
+        return ResolvedAddress(
+            street, city, state, None, geocode_query=f"{street}{location_suffix}"
+        )
+
+    intersection = _find_intersection(blob)
+    if intersection:
+        street1, street2 = intersection
+        return ResolvedAddress(
+            f"Near {street1} & {street2}",
+            city,
+            state,
+            None,
+            geocode_query=f"{street1} & {street2}{location_suffix}",
+            geocode_fallback_query=city_level_query,
+        )
+
+    return ResolvedAddress(
+        NO_STREET_ADDRESS_PLACEHOLDER, city, state, None, geocode_query=city_level_query
+    )
 
 
 def _resolve_address(record: dict[str, Any], blob: str) -> ResolvedAddress | None:
-    """Marketplace is P2P, so a full street address is rare — falls back to
-    city/state-only with an honest placeholder for the street line rather than
-    fabricating one."""
+    """Marketplace is P2P, so a full *formatted* street address (with state+zip)
+    is rare — but sellers sometimes type a real street address or cross-street
+    into the description anyway. Falls back to city/state-only with an honest
+    placeholder for the street line only when nothing more precise can be
+    found at all, rather than fabricating one."""
     location_text = " ".join(
         str(record[key]) for key in ("location", "address") if record.get(key)
     )
@@ -306,14 +457,16 @@ def _resolve_address(record: dict[str, Any], blob: str) -> ResolvedAddress | Non
 
     match = CITY_STATE_RE.search(location_text) or CITY_STATE_RE.search(blob)
     if match:
-        city, state = match.group(1).strip(), match.group(2)
-        return ResolvedAddress(
-            NO_STREET_ADDRESS_PLACEHOLDER,
-            city,
-            state,
-            None,
-            geocode_query=f"{city}, {state}",
-        )
+        return _build_resolved_address(blob, match.group(1).strip(), match.group(2))
+
+    # A named city mentioned in the text (even without ", ON") beats blindly
+    # trusting discovery_input.city below — confirmed necessary against real
+    # data: a "Toronto" search returns listings from >20 surrounding
+    # municipalities, so a listing that names its real city should never be
+    # overridden by whichever city we happened to search for.
+    known_city = _find_known_city(blob)
+    if known_city:
+        return _build_resolved_address(blob, known_city, "ON")
 
     # Confirmed against real search results: the record's own `location` field
     # is frequently null for discovery-mode matches (unlike single-URL fetches,
@@ -323,15 +476,17 @@ def _resolve_address(record: dict[str, Any], blob: str) -> ResolvedAddress | Non
     discovery_input = record.get("discovery_input")
     discovery_city = discovery_input.get("city") if isinstance(discovery_input, dict) else None
     if discovery_city:
-        return ResolvedAddress(
-            NO_STREET_ADDRESS_PLACEHOLDER,
-            str(discovery_city),
-            "",
-            None,
-            geocode_query=str(discovery_city),
-        )
+        return _build_resolved_address(blob, str(discovery_city), "")
 
     return None
+
+
+def _extract_images(record: dict[str, Any]) -> list[str] | None:
+    images = record.get("images")
+    if not isinstance(images, list):
+        return None
+    urls = [str(url) for url in images if isinstance(url, str) and url.startswith("http")]
+    return urls or None
 
 
 def _record_to_scraped_listing(record: dict[str, Any], url: str) -> ScrapedListing:
@@ -386,12 +541,14 @@ def _record_to_scraped_listing(record: dict[str, Any], url: str) -> ScrapedListi
         bedrooms=bedrooms,
         bathrooms=bathrooms,
         sqft=sqft,
+        images=_extract_images(record),
         description=description,
         landlord_name=landlord_name,
         landlord_phone=phone,
         landlord_email=email,
         status=status,
         geocode_query=address_parts.geocode_query,
+        geocode_fallback_query=address_parts.geocode_fallback_query,
     )
 
 

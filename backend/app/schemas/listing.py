@@ -23,6 +23,7 @@ class ListingBase(BaseModel):
     available_date: date | None = None
     pet_friendly: bool | None = None
     amenities: list[str] | None = None
+    images: list[str] | None = None
     landlord_name: str | None = None
     landlord_phone: str | None = None
     landlord_email: str | None = None

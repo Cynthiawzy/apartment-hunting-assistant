@@ -67,9 +67,15 @@ async def save_search(keyword: str, city: str, date_listed: str | None) -> None:
     query = DiscoveryQuery(keyword=keyword, city=city, date_listed=date_listed)
     async with AsyncSessionLocal() as db:
         result = await discover_and_save_marketplace_listings([query], db)
-    print(f"Saved {len(result.saved)}, skipped {len(result.skipped)}\n")
-    for listing in result.saved:
-        print(f"  SAVED id={listing.id}: {listing.address_line}, {listing.city} — ${listing.price}")
+        # Printed inside the session block, not after — each geocode_and_save
+        # commit during the loop expires every object already in the session
+        # (SQLAlchemy's default expire_on_commit), so accessing e.g.
+        # listing.address_line on an earlier result after the session closes
+        # raises DetachedInstanceError. Confirmed by a real crash on a 150+
+        # listing Kijiji batch (see kijiji_discovery.py's save_kijiji).
+        print(f"Saved {len(result.saved)}, skipped {len(result.skipped)}\n")
+        for listing in result.saved:
+            print(f"  SAVED id={listing.id}: {listing.address_line}, {listing.city} — ${listing.price}")
     for skip in result.skipped:
         print(f"  SKIPPED: {skip.reason}")
 

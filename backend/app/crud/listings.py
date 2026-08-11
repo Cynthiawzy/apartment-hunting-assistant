@@ -33,6 +33,7 @@ async def create_listing(db: AsyncSession, payload: ListingCreate) -> Listing:
         available_date=payload.available_date,
         pet_friendly=payload.pet_friendly,
         amenities=payload.amenities,
+        images=payload.images,
         landlord_name=payload.landlord_name,
         landlord_phone=payload.landlord_phone,
         landlord_email=payload.landlord_email,
